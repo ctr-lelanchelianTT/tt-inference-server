@@ -2167,7 +2167,7 @@ llm_templates = [
                 default_impl=True,
                 override_tt_config={
                     "sample_on_device_mode": "decode_only",
-                    "trace_region_size": 56000000,
+                    "trace_region_size": 100000000,
                 },
             ),
             DeviceModelSpec(
