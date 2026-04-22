@@ -61,10 +61,10 @@ import signal
 import sys
 from pathlib import Path
 
+import ttnn  # must be imported before mpi4py to avoid MPI library conflicts
+
 from mpi4py import MPI
 from transformers import AutoConfig
-
-import ttnn
 from models.demos.deepseek_v3_d_p.tt.moe.init_helpers import create_fabric_router_config
 from models.demos.deepseek_v3_d_p.reference.deepseek_v3_config import DeepSeekV3Config
 from models.demos.deepseek_v3_d_p.tt.moe.tt_prefill_transformer import TtPrefillTransformer
