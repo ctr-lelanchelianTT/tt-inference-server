@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import numpy as np
+import torch
 from numpy.typing import NDArray
 
 from utils.decorators import log_execution_time
@@ -24,6 +25,7 @@ _VALID_CHANNEL_COUNTS = (1, 3, 4)
 _RGB_CHANNELS = 3
 _MAX_PIXEL_VALUE = 255.0
 _NORMALIZED_RANGE_MAX = 1.0
+_POSTPROCESS_TORCH_THREADS = 8
 
 
 class VideoManager:
@@ -54,7 +56,7 @@ class VideoManager:
         try:
             processed = self._process_frames_for_export(frames)
             cmd = self._build_encode_cmd(processed, output_path, fps, crf, preset)
-            self._run_ffmpeg(cmd, stdin_data=processed.tobytes())
+            self._run_ffmpeg(cmd, stdin_data=memoryview(processed))
             return output_path
 
         except Exception as e:
@@ -66,12 +68,9 @@ class VideoManager:
         """Normalize to contiguous uint8 (N, H, W, 3) for rawvideo rgb24."""
         frames = _normalize_shape(frames)
         frames = _normalize_channels(frames)
-        frames = _normalize_dtype(frames)
-
         if not frames.flags["C_CONTIGUOUS"]:
             frames = np.ascontiguousarray(frames)
-
-        return frames
+        return _normalize_dtype(frames)
 
     @staticmethod
     def _build_encode_cmd(
@@ -200,9 +199,16 @@ def _normalize_dtype(frames: NDArray) -> NDArray[np.uint8]:
         return frames
 
     if frames.dtype in (np.float32, np.float64):
-        max_val = float(np.max(frames)) if frames.size else 0.0
-        if max_val <= _NORMALIZED_RANGE_MAX:
-            return (frames * _MAX_PIXEL_VALUE).clip(0, 255).astype(np.uint8)
-        return frames.clip(0, 255).astype(np.uint8)
+        # Worker is constrained to 1 torch thread during inference to avoid competing
+        # with device ops. Inference is complete here, so allow more threads.
+        prev_threads = torch.get_num_threads()
+        torch.set_num_threads(_POSTPROCESS_TORCH_THREADS)
+        try:
+            t = torch.from_numpy(frames)
+            if t.max().item() <= _NORMALIZED_RANGE_MAX:
+                t = t.mul_(255)
+            return t.clamp_(0, 255).byte().numpy()
+        finally:
+            torch.set_num_threads(prev_threads)
 
     return frames.clip(0, 255).astype(np.uint8)
